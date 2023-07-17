@@ -141,6 +141,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p -> mask = 0;
+
   return p;
 }
 
@@ -304,6 +306,8 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
+  
+  np -> mask = p -> mask;
 
   release(&np->lock);
 
@@ -653,4 +657,30 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+uint64 nprocs(void) {
+  uint64 n = 0;
+  for(int i = 0; i < NPROC; i++) {
+    if(proc[i].state != UNUSED) n++;
+  }
+  return n;
+}
+
+//simple load average calculation for 5 ticks
+uint64 loadavg(void) {
+  uint tick0;
+  uint64 after = 0;
+
+  tick0 = ticks;
+  
+  acquire(&tickslock);
+  while (ticks - tick0 < 5)
+  {
+    after += nprocs()/NCPU;
+    sleep(&ticks, &tickslock);
+  }
+  release(&tickslock);
+
+  return after / 5;
 }

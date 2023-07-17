@@ -120,6 +120,35 @@ void testproc() {
   }
 }
 
+void testla() {
+  struct sysinfo info;
+  uint64 loadavg;
+  int status;
+  int pid;
+  
+  sinfo(&info);
+  loadavg = info.loadavg;
+  pid = fork();
+  if(pid < 0){
+    printf("sysinfotest: fork failed\n");
+    exit(1);
+  }
+  if(pid == 0){
+    sinfo(&info);
+    if(info.loadavg != loadavg) {
+      printf("sysinfotest: FAIL loadavg is %d instead of %d\n", info.loadavg, loadavg);
+      exit(1);
+    }
+    exit(0);
+  }
+  wait(&status);
+  sinfo(&info);
+  if(info.loadavg != loadavg) {
+      printf("sysinfotest: FAIL loadavg is %d instead of %d\n", info.nproc, loadavg);
+      exit(1);
+  } 
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -127,6 +156,7 @@ main(int argc, char *argv[])
   testcall();
   testmem();
   testproc();
+  testla();
   printf("sysinfotest: OK\n");
   exit(0);
 }

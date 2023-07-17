@@ -3,6 +3,8 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
+#include "kernel/stat.h"
+#include "kernel/fs.h"
 
 // Parsed command representation
 #define EXEC  1
@@ -15,6 +17,11 @@
 
 struct cmd {
   int type;
+};
+
+struct history {
+  char *buf;
+  struct history *next;
 };
 
 struct execcmd {
@@ -49,9 +56,13 @@ struct backcmd {
   struct cmd *cmd;
 };
 
+int flag = -1;
+struct history *hist;
+
 int fork1(void);  // Fork but panics on failure.
 void panic(char*);
 struct cmd *parsecmd(char*);
+void runcmd(struct cmd*) __attribute__((noreturn));
 
 // Execute cmd.  Never returns.
 void
@@ -64,17 +75,18 @@ runcmd(struct cmd *cmd)
   struct pipecmd *pcmd;
   struct redircmd *rcmd;
 
-  if(cmd == 0)
+  if(cmd == 0) 
     exit(1);
-
+ 
   switch(cmd->type){
   default:
     panic("runcmd");
 
   case EXEC:
     ecmd = (struct execcmd*)cmd;
-    if(ecmd->argv[0] == 0)
+    if(ecmd->argv[0] == 0) {
       exit(1);
+    }
     exec(ecmd->argv[0], ecmd->argv);
     fprintf(2, "exec %s failed\n", ecmd->argv[0]);
     break;
@@ -130,23 +142,173 @@ runcmd(struct cmd *cmd)
   exit(0);
 }
 
+int is_valid_char(char c) {
+
+  return (c >= 'A' && c <= 'Z') ||
+         (c >= 'a' && c <= 'z') ||
+         (c >= '0' && c <= '9') ||
+         c == '_' || c == '.' || c == '-';
+}
+
+char *find_last_word(char *buf) {
+  char *word = buf + strlen(buf) - 1;
+  while (is_valid_char(*word) && word != buf - 1) word--;
+  word++;
+  return word;
+}
+
+int tab_completion(char *cmdbuf) {
+  char *last_word = find_last_word(cmdbuf);
+
+  //copy from find.c but make some changes
+  char buf[512], *p;
+  int fd;
+  struct stat st;
+  struct dirent de;
+  const char* path = ".";
+
+  if((fd = open(path, 0)) < 0) {
+    fprintf(2, "tab completion: cannot open %s\n", path);
+    return 0;
+  }
+
+  if(fstat(fd, &st) < 0) {
+    fprintf(2, "tab completion: cannot stat %s\n", path);
+    close(fd);
+    return 0;
+  }
+  int added_len = 0;
+  switch(st.type) {
+    case T_FILE:
+      if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf) {
+        printf("file%s\n", path);
+      }
+      break;
+  
+    case T_DIR:
+      if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf) {
+        printf("tab completion: path too long\n");
+        break;
+      }
+
+      strcpy(buf, path);
+      p = buf + strlen(buf);
+      *p++ = '/';
+      while (read(fd, &de, sizeof(de)) == sizeof de) {
+        if(de.inum == 0 || strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;
+
+        memmove(p, de.name, DIRSIZ);
+        p[DIRSIZ] = 0;
+
+        if(stat(buf, &st) < 0) {
+          printf("tab completion: cannot stat %s\n", buf);
+          continue;
+        }
+        
+        //Don't recurse into "." and ".." 
+        if(strcmp(buf + strlen(buf) - 2, "./") && strcmp(buf + strlen(buf) - 3, "/..")) {
+          char *last_word_buf = find_last_word(buf);
+          
+          //if find a similar result
+          if (!memcmp(last_word_buf, last_word, strlen(last_word))) {
+           added_len = strlen(last_word_buf) -  strlen(last_word);
+           strcpy(last_word, last_word_buf);
+           char str[strlen(last_word) + 1];
+           strcpy(str, last_word);
+           str[strlen(last_word)] = ' ';
+           strcpy(last_word, str);
+           added_len++;
+           break;
+          }
+        } 
+      }
+      break;
+    }
+    close(fd); 
+    return added_len;
+}
+
 int
 getcmd(char *buf, int nbuf)
 {
-  fprintf(2, "$ ");
+  struct stat st;
+  fstat(0, &st);
+  if (st.type == T_FILE) flag = 0;
+  if (flag == -1) { 
+    fprintf(2, "$ ");
+    char *str = malloc(sizeof(char) * (strlen(buf) + 1));
+    strcpy(str, buf);
+    if (hist) {
+      struct history *temp = hist;
+      while (temp -> next) 
+        temp = temp -> next;
+      
+      temp -> next = malloc(sizeof(struct history));
+      temp -> next -> buf = str;
+    } else {
+      hist = malloc(sizeof(struct history));
+      hist -> buf = str;
+    }
+  } 
+
   memset(buf, 0, nbuf);
-  gets(buf, nbuf);
+
+  int cc, i;
+  char c;
+
+  for (i = 0; i + 1 < nbuf;) {
+    if(flag == -1) {
+      cc = read(0, &c, 1);
+    } else {
+      cc = read(flag, &c, 1);
+    }
+    if(cc < 1) break;
+
+    if (c == '\t') {
+      i += tab_completion(buf);
+    } else {
+      buf[i++] = c;
+      if (c == '\n' || c == '\r') break;
+    }
+  }
+  buf[i] = '\0';
+
+  //gets(buf, nbuf);
   if(buf[0] == 0) // EOF
     return -1;
   return 0;
 }
 
+void process_cmd(char *buf) {
+  if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
+      // Chdir must be called by the parent, not the child.
+      buf[strlen(buf)-1] = 0;  // chop \n
+      if(chdir(buf+3) < 0)
+        fprintf(2, "cannot cd %s\n", buf+3);
+      return;
+    }
+    
+    while(*buf == ' ') buf++;
+    
+    if(memcmp(buf, "wait ", 5) == 0) {
+      printf("wait for %d ticks ...\n", atoi(buf + 5));
+      sleep(atoi(buf+5));
+      return;
+    }
+    if(fork1() == 0)
+      runcmd(parsecmd(buf));
+    wait(0);
+}
+
 int
-main(void)
+main(int argc, char **argv)
 {
   static char buf[100];
   int fd;
-
+  
+  if (argc >= 2) 
+    flag = open(argv[1], O_RDWR);
+  
   // Ensure that three file descriptors are open.
   while((fd = open("console", O_RDWR)) >= 0){
     if(fd >= 3){
@@ -155,18 +317,21 @@ main(void)
     }
   }
 
+  
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
-    if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
-      // Chdir must be called by the parent, not the child.
-      buf[strlen(buf)-1] = 0;  // chop \n
-      if(chdir(buf+3) < 0)
-        fprintf(2, "cannot cd %s\n", buf+3);
-      continue;
+    char *cmdstart = buf;
+    char *p = buf;
+    while (*p != '\0') {
+      if(*p == '(' || *p == ')') *p = ' ';
+      if(*p == ';') {
+        *p = '\0';
+        process_cmd(cmdstart);
+        cmdstart = p + 1;
+      }
+      p++;
     }
-    if(fork1() == 0)
-      runcmd(parsecmd(buf));
-    wait(0);
+    process_cmd(cmdstart);
   }
   exit(0);
 }
@@ -196,7 +361,7 @@ struct cmd*
 execcmd(void)
 {
   struct execcmd *cmd;
-
+  
   cmd = malloc(sizeof(*cmd));
   memset(cmd, 0, sizeof(*cmd));
   cmd->type = EXEC;
@@ -267,7 +432,7 @@ gettoken(char **ps, char *es, char **q, char **eq)
 {
   char *s;
   int ret;
-
+  
   s = *ps;
   while(s < es && strchr(whitespace, *s))
     s++;
