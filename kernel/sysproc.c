@@ -81,7 +81,13 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
-  return 0;
+  uint64 va;
+  int n;
+  uint64 ua;
+  //if error shows up
+  if (argaddr(0, &va) < 0 || argint(1, &n) < 0 || argaddr(2, &ua) < 0) return -1;
+
+  return pgaccess(va, n, ua);
 }
 #endif
 
@@ -107,3 +113,5 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+

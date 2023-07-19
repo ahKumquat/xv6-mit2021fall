@@ -679,3 +679,22 @@ procdump(void)
     printf("\n");
   }
 }
+
+//Detecting which pages have been accessed
+uint64 pgaccess(uint64 va, int pgn, uint64 ua) {
+  struct proc *p = myproc();
+
+  if(p == 0) return 1;
+
+  pagetable_t pgt = p -> pagetable;
+  int buff = 0;
+  for(int i = 0; i < pgn; i++) {
+    pte_t *pte = walk(pgt, va, 0); // to get the addr of the PTE in page table "pgt"
+    if ( *pte & PTE_A ) { // is accessed
+      buff |= 1 << i;
+      *pte ^= PTE_A; //clear PTE_A after checking if it is set
+    }
+    va += PGSIZE;
+  }
+  return copyout(pgt, ua, (char *)&buff, sizeof(buff));
+}
