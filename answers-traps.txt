@@ -1,0 +1,17 @@
+1.Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+x10–17(a0-7); x12(a2).
+
+2.Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+There is no call after compiler's optimization; g is inline within f and f is inline within main.
+
+3.At what address is the function printf located?
+0x0000000000000616
+
+4.What value is in the register ra just after the jalr to printf in main?
+0x0000000000000038
+
+5. What is the output? The output depends on that fact that the RISC-V is little-endian. If the RISC-V were instead big-endian what would you set i to in order to yield the same output? Would you need to change 57616 to a different value?
+"He110 world" ; "0x726c6400" ; no, No, the endianness of a system does not affect the conversion of a decimal number to hexadecimal in C.
+
+6. what is going to be printed after 'y='? (note: the answer is not a specific value.) Why does this happen?
+It will be a random number. Since a2 is not set for this call, a random based on  A random value depending on what codes there are right before the call will be assigned to "y".
