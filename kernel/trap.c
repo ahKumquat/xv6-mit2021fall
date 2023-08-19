@@ -67,7 +67,7 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else if((r_scause() == 13 || r_scause() == 15) && uvmcheckcow(r_stval())){
+  } else if((r_scause() == 13 || r_scause() == 15) && uvmcheckcow(r_stval())){ // When a page-fault occurs on a COW page, allocate a new page with kalloc()
     if (uvmcowcopy(r_stval()) == -1)
     {
       p -> killed = 1; // if there is no free memory
