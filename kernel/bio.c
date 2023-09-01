@@ -80,9 +80,7 @@ bget(uint dev, uint blockno)
   {
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
-      if (holding(&bcache.lock[id]))
-        release(&bcache.lock[id]);
-
+      release(&bcache.lock[id]);
       acquiresleep(&b->lock);
       return b;
     }
@@ -144,8 +142,7 @@ bget(uint dev, uint blockno)
   res -> valid = 0;
   res -> refcnt = 1;
   
-  if (holding(&bcache.lock[id]))
-   release(&bcache.lock[id]);
+  release(&bcache.lock[id]);
   
   acquiresleep(&res -> lock);
   return res;
