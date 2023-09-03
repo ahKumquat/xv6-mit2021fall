@@ -5,6 +5,11 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
+
 
 struct spinlock tickslock;
 uint ticks;
@@ -27,6 +32,57 @@ void
 trapinithart(void)
 {
   w_stvec((uint64)kernelvec);
+}
+
+// find a vma by using a virtual address inside  this vma.
+struct vma *findvma(struct proc *p, uint64 va) {
+  for (int i =0; i < MAXVMA; i++) {
+    struct vma *v2 = &p -> vmas[i];
+    if (v2 -> valid && va >= v2 -> addr && va < v2 -> addr + v2 -> sz) return v2;
+  }
+  return 0;
+}
+
+
+// check if a page is previously lazy-allocated for a vma
+// and needed to be touched before use.
+// if so, touch it so it's mapped to an actual physical page and contains
+// content of the mapped file.
+int vmalazy(uint64 va) {
+  struct proc *p = myproc();
+  struct vma *v = findvma(p, va);
+  if(!v) return 0;
+
+  // allocate physical page
+  void *pa = kalloc();
+  if (!pa) panic("vmalazy: kalloc");
+
+  memset(pa, 0, PGSIZE);
+
+  // read data from disk
+  begin_op();
+  ilock(v -> f -> ip);
+  readi(v -> f -> ip, 0, (uint64)pa, v -> offset + PGROUNDDOWN(va - v ->addr), PGSIZE);
+  iunlock(v -> f -> ip);
+  end_op();
+
+  int perm = PTE_U;
+
+  // set appropriate permission, and then map it.
+  if(v -> prot & PROT_READ)
+    perm |= PTE_R;
+
+  if(v -> prot & PROT_WRITE)
+    perm |= PTE_W;  
+
+  if(v -> prot & PROT_EXEC)
+    perm |= PTE_X;
+
+  if(mappages(p -> pagetable, va, PGSIZE, (uint64)pa, PTE_R | PTE_W | PTE_U) < 0)
+    panic("vmlazy: mappages");
+
+  return 1;    
+
 }
 
 //
@@ -68,9 +124,20 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
+    uint64 va = r_stval();
+    if (r_scause() == 13 || r_scause() == 15) {
+      if (!vmalazy(va))
+      {
+        goto unexpected_scause;
+      }
+      
+    } else {
+      unexpected_scause:
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
+    
   }
 
   if(p->killed)

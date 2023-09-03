@@ -82,6 +82,18 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+#define MAXVMA 16
+struct vma {
+  int valid;      // is this vma valid ?
+  uint64 addr;    // starting virtual address of vma
+  int sz;        // the number of bytes to map
+  int prot;       // it indicates whether the memory should be mapped readable, writeable, and/or executable
+  int flags;      
+  uint64 offset;  // offset of the valid mapped address
+  struct file *f; // pointer to mapped file
+};
+
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -105,4 +117,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vma vmas[MAXVMA];  // Process vma
 };
